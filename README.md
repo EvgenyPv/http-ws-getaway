@@ -15,14 +15,20 @@ Messages should be sent to "/api/send-message" via HTTP POST request and structu
 
 # Testing strategy
 To connect test device to websocket you can open "localhost:8080/", specify device_id and press "Open".
+
 One browser tab allows to open one websocket connection.
+
 To send message to "/api/send-message" endpoint you can use curl/postman or any other preffered API testing tool.
 
 # Performance considerations
-Currently we expect websocket send status to be recevied as HTTP POST reply.
+Currently it is expected that websocket send status should be recevied as HTTP POST reply.
+
 This brings as to synchronous communications, which considerably limits application performance under high load.
+
 If message send status is not expected by the sender, the following performance  improvements could be made:
-1. Perform all the writes to websocket via single goroutine.
+1. Perform all writes to specific websocket via allocated goroutine.
 2. Communicate to abovementioned goroutine via buffered channel.
+
 This would allow message sender to not depend on websocket write speed/status
+
 In this case it probably makes sense to rewrite other goroutine synchronization using channels instead of mutex
