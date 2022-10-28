@@ -78,7 +78,7 @@ window.addEventListener("load", function(evt) {
 <table>
 <tr><td valign="top" width="50%">
 <p>Click "Open" to create a connection to the server with device_id from input field.</p>
-<p>"Close" to close the connection (TODO: gracefully close websocket connection sending respective close message).</p>
+<p>"Close" to close the connection.</p>
 <form>
 <button id="open">Open</button>
 <button id="close">Close</button>

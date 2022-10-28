@@ -1,7 +1,6 @@
 package wshandler
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -16,6 +15,7 @@ type device struct {
 	wsHandler *Devices
 	devId     string
 	done      chan bool
+	send      chan []byte
 }
 
 type Devices struct {
@@ -23,11 +23,6 @@ type Devices struct {
 	mu             sync.RWMutex
 	logger         *log.Logger
 	maxMessageSize int64
-}
-
-type DeviceSendStatus struct {
-	Code int
-	Text string
 }
 
 type DeviceMess struct {
@@ -85,22 +80,16 @@ func (d *Devices) delConn(deviceId string) {
 	delete(d.conn, deviceId)
 }
 
-func (d *Devices) iterateConn(perform func(string, *device) error) []error {
+func (d *Devices) iterateConn(perform func(string, *device)) {
 	//safe concurrent range access to map
 	//execute function "perform" for each map element, return slice of errors of each call
-	var res []error
-	res = make([]error, len(d.conn))
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	i := 0
 	for devId, dev := range d.conn {
 		d.mu.RUnlock()
-		res[i] = perform(devId, dev)
-		i++
+		perform(devId, dev)
 		d.mu.RLock()
 	}
-
-	return res
 }
 
 func (d *Devices) WsEstablishDevConn(w http.ResponseWriter, r *http.Request) {
@@ -121,11 +110,17 @@ func (d *Devices) WsEstablishDevConn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dev := device{ws: c, wsHandler: d, devId: deviceId, done: make(chan bool)}
+	dev := device{
+		ws:        c,
+		wsHandler: d,
+		devId:     deviceId,
+		done:      make(chan bool),
+		send:      make(chan []byte, 256),
+	}
 	d.saveConn(deviceId, &dev)
 
 	go func(dev *device) {
-		dev.pingWS()
+		dev.WriteWS()
 	}(&dev)
 
 	c.SetReadLimit(maxMessageSize)
@@ -146,87 +141,29 @@ func (d *Devices) WsEstablishDevConn(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (d *Devices) SendMessage(devId, message, mesId, rAddr string) DeviceSendStatus {
-
-	result := DeviceSendStatus{}
+func (d *Devices) SendMessage(devId, message, mesId, rAddr string) {
 
 	if devId == "" {
 		//broadcast
-		errs := d.iterateConn(func(devId string, dev *device) error {
+		d.iterateConn(func(devId string, dev *device) {
 			//write to socket for each active connection
-			return dev.writeWS(websocket.TextMessage, []byte(message))
+			dev.send <- []byte(message)
 		})
-
-		if len(errs) == 0 {
-			statTxt := fmt.Sprintf("message id %s, from '%s', no registered devices", mesId, rAddr)
-			d.logger.Printf(statTxt)
-			result.Code = StatusDeviceNotFound
-			result.Text = statTxt
-			return result
-		}
-		errCnt := 0
-		okCnt := 0
-		iLastErr := 0
-		for i, err := range errs {
-			if err == nil {
-				okCnt++
-			} else {
-				errCnt++
-				iLastErr = i
-			}
-		}
-
-		if okCnt == 0 {
-			format := "message id %s, from '%s', error broadcasting to devices. Last err: %s"
-			statTxt := fmt.Sprintf(format, mesId, rAddr, errs[iLastErr])
-			d.logger.Printf(statTxt)
-			result.Code = StatusErrorWritingToWS
-			result.Text = statTxt
-			return result
-		}
-
-		if errCnt > 0 && okCnt > 0 {
-			format := "message id %s, from '%s', there were %d broadcasting errors. Last err: %s"
-			statTxt := fmt.Sprintf(format, mesId, rAddr, errCnt, errs[iLastErr])
-			d.logger.Printf(statTxt)
-			result.Code = StatusOK
-			result.Text = statTxt
-			return result
-		}
-
-		result.Code = StatusOK
-		result.Text = fmt.Sprintf("message id %s broadcasted successfully", mesId)
 	} else {
 		//send to specific device_id
 		dev, found := d.getConn(devId)
 		if !found {
 			format := "message id %s, from '%s', device_id '%s' not registered"
-			statTxt := fmt.Sprintf(format, mesId, rAddr, devId)
-			d.logger.Println(statTxt)
-			result.Code = StatusDeviceNotFound
-			result.Text = statTxt
-			return result
+			d.logger.Printf(format, mesId, rAddr, devId)
+			return
 		}
 
-		err := dev.writeWS(websocket.TextMessage, []byte(message))
-		if err != nil {
-			format := "message id %s, from '%s', error writing to device_id '%s'. Error: %s"
-			statTxt := fmt.Sprintf(format, mesId, rAddr, devId, err)
-			d.logger.Printf(statTxt)
-			result.Code = StatusErrorWritingToWS
-			result.Text = statTxt
-			return result
-		}
-
-		result.Code = StatusOK
-		result.Text = fmt.Sprintf("message id %s sent to %s", mesId, devId)
-
+		dev.send <- []byte(message)
 	}
 
-	return result
 }
 
-func (dev *device) pingWS() {
+func (dev *device) WriteWS() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
@@ -237,20 +174,20 @@ func (dev *device) pingWS() {
 	for {
 		select {
 		case <-ticker.C:
-			if err := dev.writeWS(websocket.PingMessage, nil); err != nil {
+			dev.ws.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := dev.ws.WriteMessage(websocket.PingMessage, nil); err != nil {
 				dev.wsHandler.logger.Printf("error pinging websocket of device id %s. Closing websocket", dev.devId)
+				return
+			}
+		case message := <-dev.send:
+			//!!!read whole buffer
+			dev.ws.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := dev.ws.WriteMessage(websocket.TextMessage, message); err != nil {
+				dev.wsHandler.logger.Printf("error writing to websocket of device id %s. Closing websocket", dev.devId)
 				return
 			}
 		case <-dev.done:
 			return
 		}
-
 	}
-}
-
-func (dev *device) writeWS(mt int, data []byte) error {
-	dev.wrMu.Lock()
-	defer dev.wrMu.Unlock()
-	dev.ws.SetWriteDeadline(time.Now().Add(writeWait))
-	return dev.ws.WriteMessage(mt, data)
 }

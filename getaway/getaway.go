@@ -45,8 +45,10 @@ func (g *WSGateway) sendMessageToDevice(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	sendStatus := g.wsHandler.SendMessage(m.DeviceId, m.Message, m.MessageId, r.RemoteAddr)
-	if sendStatus.Code == wshandler.StatusOK {
+	g.wsHandler.SendMessage(m.DeviceId, m.Message, m.MessageId, r.RemoteAddr)
+	w.WriteHeader(http.StatusOK)
+
+	/*if sendStatus.Code == wshandler.StatusOK {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(sendStatus.Text))
 	} else if sendStatus.Code == wshandler.StatusDeviceNotFound {
@@ -58,7 +60,7 @@ func (g *WSGateway) sendMessageToDevice(w http.ResponseWriter, r *http.Request) 
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("505 - unknown status code. Status text: " + sendStatus.Text))
-	}
+	}*/
 }
 
 func (g *WSGateway) homeHandler(w http.ResponseWriter, r *http.Request) {
