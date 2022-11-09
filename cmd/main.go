@@ -6,16 +6,20 @@ import (
 	"http-ws-getaway/getaway"
 	"log"
 	"os"
+	"runtime/trace"
 )
 
 var addr = flag.String("addr", "localhost:8080", "http service address")
 var debug = flag.Bool("debug", false, "Turn debug on")
 
-func traceStart(logger *log.Logger) {
+func traceStart(logger *log.Logger, f *os.File) {
+	trace.Start(f)
 	logger.Println("trace started")
 }
 
-func traceStop(logger *log.Logger) {
+func traceStop(logger *log.Logger, f *os.File) {
+	trace.Stop()
+	f.Close()
 	logger.Println("trace stopped")
 }
 
@@ -30,8 +34,12 @@ func main() {
 		HomeTemplate: homeTemplate,
 	}
 	if *debug {
-		gtw.OnStart = func() { traceStart(logger) }
-		gtw.OnStop = func() { traceStop(logger) }
+		f, err := os.Create(".\\trace.out")
+		if err != nil {
+			logger.Printf("error creating trace file: %s", err)
+		}
+		gtw.OnStart = func() { traceStart(logger, f) }
+		gtw.OnStop = func() { traceStop(logger, f) }
 	}
 	gtw.StartGetaway()
 }
@@ -59,7 +67,7 @@ window.addEventListener("load", function(evt) {
         if (ws) {
             return false;
         }
-        ws = new WebSocket("{{.}}" + "?device_id=" + input.value);
+        ws = new WebSocket("{{.}}" + "/" + input.value);
         ws.onopen = function(evt) {
             print("OPEN");
         }

@@ -3,10 +3,10 @@ package wshandler
 import (
 	"context"
 	"log"
-	"net/http"
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
@@ -94,20 +94,20 @@ func (d *Devices) iterateConn(perform func(string, *device)) {
 	}
 }
 
-func (d *Devices) WsEstablishDevConn(w http.ResponseWriter, r *http.Request) {
-	c, err := upgrader.Upgrade(w, r, nil)
+func (d *Devices) WsEstablishDevConn(ctx *gin.Context) {
+	c, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
 	if err != nil {
 		d.logger.Println("upgrade:", err)
 		return
 	}
-	deviceId := r.URL.Query().Get("device_id")
+	deviceId := ctx.Params.ByName("deviceId")
 	if deviceId == "" {
 		clsMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "device_id is expected")
 		wErr := c.WriteMessage(websocket.CloseMessage, clsMsg)
 		if wErr != nil {
 			d.logger.Println("write :", err)
 		}
-		d.logger.Println(r.RemoteAddr, "device id isn't provided")
+		d.logger.Println(ctx.Request.RemoteAddr, "device id isn't provided")
 		c.Close()
 		return
 	}

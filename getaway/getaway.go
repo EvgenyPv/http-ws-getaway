@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -32,10 +33,12 @@ func (g *WSGateway) StartGetaway() {
 	}
 	g.ctx, _ = signal.NotifyContext(context.Background(), os.Interrupt)
 	g.wsHandler = wshandler.NewHandler(g.Logger, g.ctx)
-	router := http.NewServeMux()
-	router.HandleFunc(g.SendApiURI, g.sendMessageToDevice)
-	router.HandleFunc(g.DevicesWsURI, g.wsHandler.WsEstablishDevConn)
-	router.HandleFunc("/", g.homeHandler)
+	router := gin.Default()
+	router.POST(g.SendApiURI, g.sendMessageToDevice)
+	router.GET(g.DevicesWsURI+"/:deviceId", g.wsHandler.WsEstablishDevConn)
+	//due to bug in go tool trace? trace with SigInt doesn't work
+	//router.GET("/stoptrace", func(c *gin.Context) { g.OnStop(); c.String(http.StatusOK, "Ok") })
+	router.GET("/", g.homeHandler)
 
 	server := &http.Server{
 		Addr:     g.SrvAddr,
@@ -62,24 +65,19 @@ func (g *WSGateway) StartGetaway() {
 
 }
 
-func (g *WSGateway) StopGateway() {
-
-}
-
-func (g *WSGateway) sendMessageToDevice(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(r.Body)
+func (g *WSGateway) sendMessageToDevice(c *gin.Context) {
+	decoder := json.NewDecoder(c.Request.Body)
 	m := wshandler.DeviceMess{}
 	err := decoder.Decode(&m)
 	if err != nil {
-		g.Logger.Println("message decode from ", r.RemoteAddr, err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("500 - wrong message format"))
+		g.Logger.Println("message decode from ", c.Request.RemoteAddr, err)
+		c.String(http.StatusInternalServerError, "500 - wrong message format")
 		return
 	}
 
-	g.wsHandler.SendMessage(m.DeviceId, m.Message, m.MessageId, r.RemoteAddr)
-	w.WriteHeader(http.StatusOK)
+	g.wsHandler.SendMessage(m.DeviceId, m.Message, m.MessageId, c.Request.RemoteAddr)
 
+	c.String(http.StatusOK, "Message is sent")
 	/*if sendStatus.Code == wshandler.StatusOK {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(sendStatus.Text))
@@ -95,6 +93,7 @@ func (g *WSGateway) sendMessageToDevice(w http.ResponseWriter, r *http.Request) 
 	}*/
 }
 
-func (g *WSGateway) homeHandler(w http.ResponseWriter, r *http.Request) {
-	g.HomeTemplate.Execute(w, "ws://"+r.Host+"/api/device-ws")
+func (g *WSGateway) homeHandler(c *gin.Context) {
+	g.HomeTemplate.Execute(c.Writer, "ws://"+c.Request.Host+"/api/device-ws")
+
 }
