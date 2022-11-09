@@ -9,6 +9,15 @@ import (
 )
 
 var addr = flag.String("addr", "localhost:8080", "http service address")
+var debug = flag.Bool("debug", false, "Turn debug on")
+
+func traceStart(logger *log.Logger) {
+	logger.Println("trace started")
+}
+
+func traceStop(logger *log.Logger) {
+	logger.Println("trace stopped")
+}
 
 func main() {
 	flag.Parse()
@@ -19,6 +28,10 @@ func main() {
 		DevicesWsURI: "/api/device-ws",
 		Logger:       logger,
 		HomeTemplate: homeTemplate,
+	}
+	if *debug {
+		gtw.OnStart = func() { traceStart(logger) }
+		gtw.OnStop = func() { traceStop(logger) }
 	}
 	gtw.StartGetaway()
 }

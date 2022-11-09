@@ -1,6 +1,7 @@
 package wshandler
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"sync"
@@ -19,10 +20,10 @@ type device struct {
 }
 
 type Devices struct {
-	conn           map[string]*device
-	mu             sync.RWMutex
-	logger         *log.Logger
-	maxMessageSize int64
+	conn   map[string]*device
+	mu     sync.RWMutex
+	logger *log.Logger
+	ctx    context.Context
 }
 
 type DeviceMess struct {
@@ -54,10 +55,11 @@ const (
 
 var upgrader = websocket.Upgrader{} // use default options
 
-func NewHandler(logger *log.Logger) Devices {
+func NewHandler(logger *log.Logger, ctx context.Context) Devices {
 	return Devices{
 		conn:   make(map[string]*device),
 		logger: logger,
+		ctx:    ctx,
 	}
 }
 
@@ -187,6 +189,8 @@ func (dev *device) WriteWS() {
 				return
 			}
 		case <-dev.done:
+			return
+		case <-dev.wsHandler.ctx.Done():
 			return
 		}
 	}
